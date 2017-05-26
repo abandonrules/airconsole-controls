@@ -6,22 +6,27 @@
  * @property {Function} touchstart -
  *           The callback that gets called when the SwipeAnalog is touched
  * @property {SwipeAnalog~touchEndCallback} touchend -
- *           The callback that gets called when the SwipeAnalog is released
+ *           The callback that gets called when the SwipeAnalog is released.
+ *           The first param is the event object. The second a boolean if swipe
+ *           was triggered.
  * @property {number|undefined} min_swipe_distance - amount of pixels
  *           which the user needs to move or tap the SwipeAnalog before triggering a
  *           direction. E.g: 20
+ * @property (Boolean) is_slingshot - If it should trigger with every on-move event.
  * @property {boolean} log - Debug output iff a callback is not set.
  */
 
  /**
   * This callback is called when the amount of pixels swiped exceeds the
-  * min_swipe_distance
+  * min_swipe_distance (if is_slingshot is false)
   * @callback SwipeArea~onTrigger
   * @param {SwipeArea~Vector} vector - A normalized direction vector
   *        @property {Number} x - The x property
   *        @property {Number} y - The y property
   *        @property {Number} angle - The angle in radian
   *        @property {Number} degree - The angle in degree
+  *        @property {Number} distance - The distance in px which was swiped
+  *        @property {Number} speed - average px per seconds speed which was swiped
   */
 
 /**
@@ -34,12 +39,14 @@
 var SwipeAnalog = function(el, opts) {
   opts = opts || {}
   this.min_swipe_distance = opts.min_swipe_distance || 30;
+  this.is_slingshot = opts.is_slingshot || false;
   this.is_touch_down = false;
   this.has_triggered_for_current_swipe = false;
   this.start_position = {
     x: 0,
     y: 0
   };
+  this.start_move_ts = null;
 
   if (typeof el == "string") {
     el = document.getElementById(el);
@@ -89,6 +96,7 @@ SwipeAnalog.prototype = {
    */
   onTouchStart: function(e) {
     this.is_touch_down = true;
+    this.start_move_ts = new Date().getTime();
     this.setStartPosition(e);
     this.start_cb(e);
     e.preventDefault();
@@ -102,7 +110,7 @@ SwipeAnalog.prototype = {
   onTouchMove: function(e) {
     if (this.is_touch_down) {
       this.move_cb(e);
-      if (this.has_triggered_for_current_swipe) return;
+      if (this.has_triggered_for_current_swipe && !this.is_slingshot) return;
       var swipe_vector = this.getSwipeVector(e);
       if (swipe_vector) {
         this.has_triggered_for_current_swipe = true;
@@ -118,8 +126,8 @@ SwipeAnalog.prototype = {
    */
   onTouchEnd: function(e) {
     this.is_touch_down = false;
+    this.end_cb(e, this.has_triggered_for_current_swipe);
     this.has_triggered_for_current_swipe = false;
-    this.end_cb(e);
     this.container.className = this.container.className.replace(/ button\-active/g, "");
     e.preventDefault();
   },
@@ -148,7 +156,7 @@ SwipeAnalog.prototype = {
 
     // Check if distance has been exceeded and calculate direction vector
     var distance = this.getDistanceBetweenTwoPoints(pos, vec);
-    if (distance >= this.min_swipe_distance) {
+    if (distance >= this.min_swipe_distance || this.is_slingshot) {
 
       swipe_vector = this.getNormalizedVector({
         x: pos.x - vec.x,
@@ -159,10 +167,14 @@ SwipeAnalog.prototype = {
       if (angle < 0) {
         angle += 2 * Math.PI;
       }
+      swipe_vector.distance = distance;
       swipe_vector.angle = angle;
       swipe_vector.degree = Math.round(angle * 180 / Math.PI);
+      if (this.start_move_ts) {
+        var time_delta = (+new Date()) - this.start_move_ts;
+        swipe_vector.speed = Math.round(distance / (time_delta / 1000), 10);
+      }
     }
-
     return swipe_vector;
   },
 
